@@ -8,4 +8,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.40"
+bdk = "0.6.0"
 clap = "2.33.3"
+electrum2descriptors = "0.4.0"
+esplora-api = {version = "0.1.0", features = ["blocking"]}
