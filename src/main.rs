@@ -6,6 +6,7 @@ use clap::{App, Arg, ArgMatches};
 use esplora_api::blocking::ApiClient;
 use esplora_api::data::blockstream::AddressInfoFormat;
 use indicatif::{ProgressBar, ProgressStyle};
+use num_format::{Locale, ToFormattedString};
 use rayon::prelude::*;
 
 use libelectrum2descriptors::ElectrumExtendedKey;
@@ -17,8 +18,8 @@ const DEFAULT_START: &str = "0";
 const DEFAULT_END: &str = "15";
 const DEFAULT_ESPLORA: &str = "https://blockstream.info/api/";
 
-// TODO: no unwrap()
 // TODO: add docs
+// TODO: split into multiple files
 // Test with xpub6BosfCnifzxcFwrSzQiqu2DBVTshkCXacvNsWGYJVVhhawA7d4R5WSWGFNbi8Aw6ZRc1brxMyWMzG3DSSSSoekkudhUd9yLb6qx39T9nMdj
 
 fn main() -> Result<()> {
@@ -85,6 +86,10 @@ fn main() -> Result<()> {
 
 fn process_cli(matches: &ArgMatches) -> Result<()> {
     let args = Args::new(matches)?;
+    if args.n <= 0 {
+        return Ok(());
+    }
+
     let (receive_descriptor, change_descriptor) = get_descriptors(args.xpub)?;
     let wallet = DerivationWallet {
         receive: create_wallet(&receive_descriptor)?,
@@ -95,14 +100,13 @@ fn process_cli(matches: &ArgMatches) -> Result<()> {
         return print_addresses(&wallet, &args);
     }
 
-    let esplora = ApiClient::new(args.esplora, None).unwrap();
+    let spinner = create_spinner();
+    let esplora = ApiClient::new(args.esplora, None)
+        .map_err(|_e| anyhow!("Can't connect to {:?}", args.esplora))?;
+    check_and_print_addresses(&wallet, &esplora, &args)?;
+    spinner.finish_and_clear();
 
-    return check_and_print_addresses(&wallet, &esplora, &args);
-}
-
-struct DerivationWallet {
-    receive: Wallet<(), MemoryDatabase>,
-    change: Wallet<(), MemoryDatabase>,
+    Ok(())
 }
 
 struct Args<'a> {
@@ -125,8 +129,12 @@ impl Args<'_> {
         }
 
         Ok(Args {
-            xpub: matches.value_of("xpub").unwrap(),
-            esplora: matches.value_of("esplora").unwrap(),
+            xpub: matches
+                .value_of("xpub")
+                .with_context(|| "xpub is missing")?,
+            esplora: matches
+                .value_of("esplora")
+                .with_context(|| "Esplora URL is missing")?,
             n: parse_num(matches.value_of("n"))?,
             start,
             end,
@@ -134,6 +142,11 @@ impl Args<'_> {
             is_offline: matches.is_present("offline"),
         })
     }
+}
+
+struct DerivationWallet {
+    receive: Wallet<(), MemoryDatabase>,
+    change: Wallet<(), MemoryDatabase>,
 }
 
 fn is_positive_num(to_check: String) -> Result<(), String> {
@@ -145,10 +158,11 @@ fn is_positive_num(to_check: String) -> Result<(), String> {
 }
 
 fn parse_num(to_parse: Option<&str>) -> Result<u32> {
-    to_parse
-        .unwrap()
+    let value = to_parse.ok_or_else(|| anyhow!("String argument is missing"))?;
+
+    value
         .parse::<u32>()
-        .with_context(|| format!("{} is not a valid number", to_parse.unwrap()))
+        .with_context(|| format!("{} is not a valid number", value))
 }
 
 fn get_descriptors(xpub: &str) -> Result<(String, String)> {
@@ -156,10 +170,26 @@ fn get_descriptors(xpub: &str) -> Result<(String, String)> {
         .map_err(|e| anyhow!("{:?} is not a valid xpub: {:?}", xpub, e))?
         .to_descriptors();
 
-    Ok((
-        descriptors.get(0).unwrap().to_string(),
-        descriptors.get(1).unwrap().to_string(),
-    ))
+    let receive = descriptors
+        .get(0)
+        .ok_or_else(|| {
+            anyhow!(
+                "Failed to generate descriptor for receiving addresses of {}",
+                xpub
+            )
+        })?
+        .to_string();
+    let change = descriptors
+        .get(1)
+        .ok_or_else(|| {
+            anyhow!(
+                "Failed to generate descriptor for change addresses of {}",
+                xpub
+            )
+        })?
+        .to_string();
+
+    Ok((receive, change))
 }
 
 fn create_wallet(descriptor: &String) -> Result<Wallet<(), MemoryDatabase>> {
@@ -171,8 +201,6 @@ fn create_wallet(descriptor: &String) -> Result<Wallet<(), MemoryDatabase>> {
     )?)
 }
 
-// TODO: refactor
-// TODO: pretty print
 // TODO: use async instead of rayon
 fn check_and_print_addresses(
     wallet: &DerivationWallet,
@@ -181,31 +209,54 @@ fn check_and_print_addresses(
 ) -> Result<()> {
     let (receive, change) = derive_addresses(wallet, args)?;
 
-    let spinner = create_spinner();
-    let (receive_info, change_info) = request_esplora(esplora, &receive, &change)?;
-    spinner.finish_and_clear();
+    let receive_info = request_esplora(esplora, &receive)?;
+    let change_info = request_esplora(esplora, &change)?;
 
-    print_address_infos(&receive_info, &change_info, &args);
+    print_address_infos(&receive_info, &change_info, &args)?;
 
     let (total_balance, total_txs) = calculate_totals(&receive_info, &change_info);
-    println!();
-    println!("-> total balance     : {} sat", total_balance);
-    println!("-> total transactions: {} txs", total_txs);
+
+    print_summary(total_balance, total_txs);
 
     Ok(())
 }
 
-fn print_addresses(wallet: &DerivationWallet, args: &Args) -> Result<()> {
-    for i in 0..args.n {
-        let address = wallet.receive.get_address(AddressIndex::Peek(i))?;
-        if !args.is_change && (args.start..=args.end).contains(&i) {
-            println!("{} {}", i, address);
-        }
+fn print_summary(balance: i64, tx_count: i32) {
+    println!(
+        "\n-> total balance     : {} sat\n-> total transactions: {} txs",
+        balance.to_formatted_string(&Locale::en),
+        tx_count.to_formatted_string(&Locale::en)
+    );
+}
 
-        let address = wallet.change.get_address(AddressIndex::Peek(i))?;
-        if args.is_change && (args.start..=args.end).contains(&i) {
-            println!("{} {}", i, address);
-        }
+fn print_address_info(
+    index: u32,
+    is_change: bool,
+    address: &str,
+    balance: Option<i64>,
+    tx_count: Option<i32>,
+) {
+    let full_index = format!("{}/{}", if is_change { 1 } else { 0 }, index);
+    print!("{:<5} {:<40}", full_index, address);
+    if let Some(num) = balance {
+        print!("  {} sat", num.to_formatted_string(&Locale::en));
+    }
+    if let Some(num) = tx_count {
+        print!("  {} txs", num.to_formatted_string(&Locale::en));
+    }
+    println!();
+}
+
+fn print_addresses(wallet: &DerivationWallet, args: &Args) -> Result<()> {
+    let to_print = if args.is_change {
+        &wallet.change
+    } else {
+        &wallet.receive
+    };
+
+    for i in args.start..=args.end {
+        let address = to_print.get_address(AddressIndex::Peek(i))?;
+        print_address_info(i, args.is_change, &address.to_string(), None, None)
     }
 
     Ok(())
@@ -238,46 +289,63 @@ fn derive_addresses(wallet: &DerivationWallet, args: &Args) -> Result<(Vec<Strin
     Ok((receive, change))
 }
 
-fn request_esplora(
-    esplora: &ApiClient,
-    receive: &Vec<String>,
-    change: &Vec<String>,
-) -> Result<(Vec<AddressInfoFormat>, Vec<AddressInfoFormat>)> {
-    let receive_info = receive
+fn request_esplora(esplora: &ApiClient, addresses: &Vec<String>) -> Result<Vec<AddressInfoFormat>> {
+    let results = addresses
         .par_iter()
-        .map(|addr| esplora.get_address(addr).unwrap())
-        .collect::<Vec<AddressInfoFormat>>();
-    let change_info = change
-        .par_iter()
-        .map(|addr| esplora.get_address(addr).unwrap())
-        .collect::<Vec<AddressInfoFormat>>();
+        .map(|addr| {
+            esplora
+                .get_address(addr)
+                .map_err(|_e| anyhow!("Esplora request for {:?} failed", addr))
+        })
+        .collect::<Vec<Result<AddressInfoFormat>>>();
 
-    Ok((receive_info, change_info))
+    let mut address_infos: Vec<AddressInfoFormat> = Vec::with_capacity(results.len());
+    for addr in results.into_iter() {
+        address_infos.push(addr?);
+    }
+
+    Ok(address_infos)
+}
+
+trait AddressInfo {
+    fn balance(&self) -> i64;
+    fn tx_count(&self) -> i32;
+    fn address(&self) -> Result<&String>;
+}
+
+impl AddressInfo for AddressInfoFormat {
+    fn balance(&self) -> i64 {
+        self.chain_stats.funded_txo_sum - self.chain_stats.spent_txo_sum
+    }
+    fn tx_count(&self) -> i32 {
+        self.chain_stats.tx_count
+    }
+    fn address(&self) -> Result<&String> {
+        Ok(self
+            .address
+            .as_ref()
+            .ok_or_else(|| anyhow!("Missing address in Esplora response"))?)
+    }
 }
 
 fn calculate_totals(
     receive: &Vec<AddressInfoFormat>,
     change: &Vec<AddressInfoFormat>,
 ) -> (i64, i32) {
-    let (balance, tx): (Vec<i64>, Vec<i32>) = receive
+    let (balance, tx_count): (Vec<i64>, Vec<i32>) = receive
         .iter()
         .chain(change.iter())
-        .map(|i| {
-            (
-                i.chain_stats.funded_txo_sum - i.chain_stats.spent_txo_sum,
-                i.chain_stats.tx_count,
-            )
-        })
+        .map(|i| (i.balance(), i.tx_count()))
         .unzip();
 
-    (balance.iter().sum(), tx.iter().sum())
+    (balance.iter().sum(), tx_count.iter().sum())
 }
 
 fn print_address_infos(
     receive_info: &Vec<AddressInfoFormat>,
     change_info: &Vec<AddressInfoFormat>,
     args: &Args,
-) {
+) -> Result<()> {
     let to_print = if args.is_change {
         change_info
     } else {
@@ -286,14 +354,12 @@ fn print_address_infos(
 
     let mut index = args.start;
     for addr in to_print {
-        let balance = addr.chain_stats.funded_txo_sum - addr.chain_stats.spent_txo_sum;
-        let txs = addr.chain_stats.tx_count;
-        println!(
-            "{} {} {} sat {} txs",
+        print_address_info(
             index,
-            addr.address.as_ref().unwrap(),
-            balance,
-            txs
+            args.is_change,
+            addr.address()?,
+            Some(addr.balance()),
+            Some(addr.tx_count()),
         );
         index += 1;
 
@@ -301,4 +367,6 @@ fn print_address_infos(
             break;
         }
     }
+
+    Ok(())
 }
