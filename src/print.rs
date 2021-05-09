@@ -1,37 +1,22 @@
 use super::Args;
-use crate::esplora::AddressInfo;
+use crate::esplora::*;
 use crate::wallet::DerivationWallet;
 use anyhow::Result;
 use bdk::wallet::AddressIndex;
 use esplora_api::data::blockstream::AddressInfoFormat;
 use num_format::{Locale, ToFormattedString};
 
-/// Prints the summary of total balances and transaction counts
-pub fn print_summary(balance: i64, tx_count: i32) {
-    println!(
-        "\n-> total balance     : {} sat\n-> total transactions: {} txs\n",
-        balance.to_formatted_string(&Locale::en),
-        tx_count.to_formatted_string(&Locale::en)
-    );
-}
+/// Prints desired addresses with their infos and the summary
+pub fn print_all(
+    receive_info: &Vec<AddressInfoFormat>,
+    change_info: &Vec<AddressInfoFormat>,
+    args: &Args,
+) -> Result<()> {
+    print_address_infos(&receive_info, &change_info, &args)?;
+    let (total_balance, total_txs) = calculate_totals(&receive_info, &change_info);
+    print_summary(total_balance, total_txs);
 
-/// Print a single address of the desired account with its index, balance and transaction count
-pub fn print_address_info(
-    index: u32,
-    is_change: bool,
-    address: &str,
-    balance: Option<i64>,
-    tx_count: Option<i32>,
-) {
-    let full_index = format!("{}/{}", if is_change { 1 } else { 0 }, index);
-    print!("{:<5} {:<40}", full_index, address);
-    if let Some(num) = balance {
-        print!("  {} sat", num.to_formatted_string(&Locale::en));
-    }
-    if let Some(num) = tx_count {
-        print!("  {} txs", num.to_formatted_string(&Locale::en));
-    }
-    println!();
+    Ok(())
 }
 
 /// Derives and prints addresses of the desired account with their indexes
@@ -50,8 +35,36 @@ pub fn print_addresses_offline(wallet: &DerivationWallet, args: &Args) -> Result
     Ok(())
 }
 
+/// Prints the summary of total balances and transaction counts
+fn print_summary(balance: i64, tx_count: i32) {
+    println!(
+        "\n-> total balance     : {} sat\n-> total transactions: {} txs\n",
+        balance.to_formatted_string(&Locale::en),
+        tx_count.to_formatted_string(&Locale::en)
+    );
+}
+
+/// Print a single address of the desired account with its index, balance and transaction count
+fn print_address_info(
+    index: u32,
+    is_change: bool,
+    address: &str,
+    balance: Option<i64>,
+    tx_count: Option<i32>,
+) {
+    let full_index = format!("{}/{}", if is_change { 1 } else { 0 }, index);
+    print!("{:<5} {:<40}", full_index, address);
+    if let Some(num) = balance {
+        print!("  {} sat", num.to_formatted_string(&Locale::en));
+    }
+    if let Some(num) = tx_count {
+        print!("  {} txs", num.to_formatted_string(&Locale::en));
+    }
+    println!();
+}
+
 /// Prints the addresses of the desired account with their indexes, balances and transaction counts
-pub fn print_address_infos(
+fn print_address_infos(
     receive_info: &Vec<AddressInfoFormat>,
     change_info: &Vec<AddressInfoFormat>,
     args: &Args,

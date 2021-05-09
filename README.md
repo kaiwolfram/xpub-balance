@@ -1,6 +1,6 @@
 # xpub-balance
 Checks the balance of an xpub and its addresses.
-Uses Esplora to collect address informations.
+Uses Esplora to collect address information.
 
 Usage
 ------------
@@ -47,5 +47,5 @@ MyWMzG3DSSSSoekkudhUd9yLb6qx39T9nMdj  0 10
 0/10  146emAmGumhnsT9nPCALU2JWeS4koxfFRB    0 sat  2 txs
 
 -> total balance     : 0 sat
--> total transactions: 77 txs
+-> total transactions: 98 txs
 ```
