@@ -88,18 +88,11 @@ fn process_cli(matches: &ArgMatches) -> Result<()> {
         return print_addresses_offline(&wallet, &args);
     }
 
-    // TODO: refactor
     let spinner = create_spinner();
     let esplora = ApiClient::new(args.esplora, None)
         .map_err(|_e| anyhow!("Can't connect to {:?}", args.esplora))?;
-    let (receive, change) = derive_addresses(&wallet, &args)?;
-    let receive_info = request_esplora(&esplora, &receive)?;
-    let change_info = request_esplora(&esplora, &change)?;
+    check_and_print_addresses(&wallet, &esplora, &args)?;
     spinner.finish_and_clear();
-
-    print_address_infos(&receive_info, &change_info, &args)?;
-    let (total_balance, total_txs) = calculate_totals(&receive_info, &change_info);
-    print_summary(total_balance, total_txs);
 
     Ok(())
 }
@@ -157,6 +150,26 @@ fn parse_num(to_parse: Option<&str>) -> Result<u32> {
     value
         .parse::<u32>()
         .with_context(|| format!("{} is not a valid number", value))
+}
+
+/// Requests data from Esplora and prints addresses of the desired account with their balances and transaction counts
+fn check_and_print_addresses(
+    wallet: &DerivationWallet,
+    esplora: &ApiClient,
+    args: &Args<'_>,
+) -> Result<()> {
+    let (receive, change) = derive_addresses(wallet, args)?;
+
+    let receive_info = request_esplora(esplora, &receive)?;
+    let change_info = request_esplora(esplora, &change)?;
+
+    print_address_infos(&receive_info, &change_info, &args)?;
+
+    let (total_balance, total_txs) = calculate_totals(&receive_info, &change_info);
+
+    print_summary(total_balance, total_txs);
+
+    Ok(())
 }
 
 /// Creates a spinner to indicate that the program is still running. Shows "Requesting data..." with moving dots
