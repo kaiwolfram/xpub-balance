@@ -9,7 +9,7 @@ use num_format::{Locale, ToFormattedString};
 /// Prints the summary of total balances and transaction counts
 pub fn print_summary(balance: i64, tx_count: i32) {
     println!(
-        "\n-> total balance     : {} sat\n-> total transactions: {} txs",
+        "\n-> total balance     : {} sat\n-> total transactions: {} txs\n",
         balance.to_formatted_string(&Locale::en),
         tx_count.to_formatted_string(&Locale::en)
     );

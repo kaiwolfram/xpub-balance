@@ -3,6 +3,13 @@ name = "xpub-balance"
 version = "0.1.0"
 authors = ["kaiwitt <kaiwitt@protonmail.com>"]
 edition = "2018"
+description = "Checks the balance of an xpub and its addresses"
+readme = "README.md"
+homepage = "https://github.com/KaiWitt/xpub-balance/"
+repository = "https://github.com/KaiWitt/xpub-balance/"
+license = "MIT"
+keywords = ["bitcoin", "cli", "watch-only", "xpub"]
+categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

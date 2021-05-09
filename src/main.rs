@@ -26,7 +26,6 @@ fn main() -> Result<()> {
         )
         .arg(
             Arg::with_name("start")
-                .alias("first")
                 .help("First index to print")
                 .default_value(constants::DEFAULT_START)
                 .validator(is_positive_num)
@@ -35,7 +34,6 @@ fn main() -> Result<()> {
         )
         .arg(
             Arg::with_name("end")
-                .alias("last")
                 .help("Last index to print")
                 .default_value(constants::DEFAULT_END)
                 .validator(is_positive_num)
@@ -52,6 +50,7 @@ fn main() -> Result<()> {
         )
         .arg(
             Arg::with_name("esplora")
+                .alias("url")
                 .help("Use a specific Esplora URL")
                 .short("e")
                 .long("esplora")
