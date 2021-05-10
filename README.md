@@ -1,6 +1,7 @@
 # xpub-balance
-Checks the balance of an xpub and its addresses.
-Uses Esplora to collect address information.
+Checks the balance of an xpub and its addresses, uses Esplora to collect address information.
+
+Also works with the other extended public key types (ypub and zpub)
 
 Usage
 ------------
